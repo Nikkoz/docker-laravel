@@ -1,0 +1,107 @@
+version: '3'
+
+#Docker Networks
+networks:
+  backend-network: &backend_network
+    driver: bridge
+  frontend-network: &frontend_network
+    driver: bridge
+
+#Volumes
+volumes:
+  #dbdata:
+  #  driver: local
+  redis-data:
+  mariadb-data:
+  home-dir:
+
+services:
+  #PHP Service
+  &app-service app:
+    build:
+      context: ./
+      dockerfile: ./docker/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME}_app
+    container_name: ${COMPOSE_PROJECT_NAME}_app
+    user: "${USER_ID:-1000}:${GROUP_ID:-1000}"
+    restart: unless-stopped
+    tty: true
+    hostname: *app-service
+    environment:
+      SERVICE_NAME: app
+      SERVICE_TAGS: dev
+      REDIS_HOST: redis
+      REDIS_PORT: &redis-port 6379
+      DB_HOST: mariadb
+      DB_PORT: &mariadb-port 3306
+      DB_DATABASE: &mariadb-db-name app
+      DB_USERNAME: &mariadb-username app
+      DB_PASSWORD: &mariadb-password secret
+      SCHEDULE_PERIOD: 60
+      APP_ENV: local
+      APP_DEBUG: 'true'
+      HOME: /home/user
+    working_dir: /var/www
+    volumes:
+      - ./src:/var/www
+      - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+    depends_on:
+      - redis
+      - mariadb
+    networks:
+      - backend-network
+
+  redis:
+    image: redis:4.0.11-alpine
+    container_name: ${COMPOSE_PROJECT_NAME}_redis
+    restart: always
+    command: redis-server
+    volumes:
+      - redis-data:/data:rw
+    ports: [*redis-port, '16379:6379'] # Port 16379 for connecting from localhost
+    networks:
+      - backend-network
+
+  #Nginx Service
+  nginx:
+    image: nginx:alpine
+    container_name: ${COMPOSE_PROJECT_NAME}_nginx
+    restart: always
+    tty: true
+    ports:
+      - "8089:80"
+      - "443:443"
+    volumes:
+      - ./src:/var/www
+      - ./docker/nginx/conf.d/:/etc/nginx/conf.d/
+    depends_on:
+      - *app-service
+    networks:
+      - backend-network
+
+  #DB
+  mariadb:
+    image: bianjp/mariadb-alpine:latest
+    container_name: ${COMPOSE_PROJECT_NAME}_mariadb
+    restart: always
+    tty: true
+    environment:
+      MYSQL_DATABASE: *mariadb-db-name
+      MYSQL_USER: *mariadb-username
+      MYSQL_PASSWORD: *mariadb-password
+      MYSQL_ROOT_PASSWORD: *mariadb-password
+    volumes:
+      - mariadb-data:/var/lib/mysql:rw
+    ports: [*mariadb-port, '13306:3306'] # Port 13306 for connecting from localhost using, for example, data-grip
+    networks:
+      - backend-network
+
+  &node-service node:
+    image: *node-service
+    container_name: ${COMPOSE_PROJECT_NAME}_node
+    build:
+      context: ./
+      dockerfile: ./docker/node/Dockerfile
+    tty: true
+    volumes:
+      - ./:/var/www
