@@ -104,4 +104,4 @@ services:
       dockerfile: ./docker/node/Dockerfile
     tty: true
     volumes:
-      - ./:/var/www
+      - ./src:/var/www
